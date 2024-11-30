@@ -1,49 +1,84 @@
 const express = require('express');
-const http = require('http');
-const WebSocket = require('ws'); // Import the WebSocket module
-
+const server = require('http').createServer();
 const app = express();
-const server = http.createServer(app); // Create HTTP server
 
-// Serve index.html on the root route
-app.get('/', function (req, res) {
-    res.sendFile('index.html', { root: __dirname });
+app.get('/', function(req, res) {
+    res.sendFile('index.html', {root: __dirname});
 });
 
-// Start the server
-server.listen(3000, function () {
-    console.log('Welcome to Mero-Link');
-});
+server.on('request', app);
+server.listen(3000, function() { console.log('server started on port 3000'); });
 
-// Create a WebSocket server
-const wss = new WebSocket.Server({ server }); // Attach WebSocket server to HTTP server
 
-// Listen for WebSocket connections
+
+
+/** Begin websocket */
+const WebSocketServer = require('ws').Server;
+
+const wss = new WebSocketServer({server: server});
+
+process.on('SIGINT', () => {
+    console.log('sigint');
+    wss.clients.forEach(function each(client) {
+        client.close();
+    });
+    server.close(() => {
+        shutdownDB();
+    })
+})
+
+
 wss.on('connection', function connection(ws) {
     const numClients = wss.clients.size;
-    console.log('Client connected:', numClients);
+    console.log('Clients connected', numClients);
 
-    // Broadcast the number of connected clients
     wss.broadcast(`Current visitors: ${numClients}`);
 
-    // Send a welcome message to the connected client
-    if (ws.readyState === WebSocket.OPEN) {
-        ws.send('Welcome to Mero-Link');
+    if (ws.readyState === ws.OPEN) {
+        ws.send('Welcome to my server');
     }
 
-    // Handle client disconnection
+    db.run(`INSERT INTO visitors (count, time)
+        VALUES (${numClients}, datetime('now'))
+    `);
+
     ws.on('close', function close() {
-        console.log('Client disconnected');
-        const numClients = wss.clients.size;
         wss.broadcast(`Current visitors: ${numClients}`);
+        console.log('A client has disconnected');
     });
+
 });
 
-// Define a broadcast method for the WebSocket server
 wss.broadcast = function broadcast(data) {
     wss.clients.forEach(function each(client) {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(data);
-        }
+        client.send(data);
     });
-};
+}
+
+/** end websockets */
+/** begin database */
+const sqlite = require('sqlite3');
+const db = new sqlite.Database(':memory:');
+
+db.serialize(() => {
+    db.run(`
+        CREATE TABLE visitors (
+            count INTEGER,
+            time TEXT
+        )
+    `)
+});
+
+function getCounts() {
+    db.each("SELECT * FROM visitors", (err, row) => {
+        console.log(row);
+    });
+}
+
+function shutdownDB() {
+    console.log('Shutting down db');
+
+    getCounts();
+    db.close();
+
+}
